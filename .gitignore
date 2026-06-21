@@ -1,7 +1,10 @@
-# Environment variables
+# Virtual Environment
+venv/
+env/
+
+# Environment variables (IMPORTANT - don't commit secrets!)
 .env
 .env.local
-.env.*.local
 
 # Python
 __pycache__/
@@ -9,9 +12,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-ENV/
 build/
 develop-eggs/
 dist/
@@ -32,10 +32,9 @@ wheels/
 node_modules/
 npm-debug.log
 yarn-error.log
-build/
-dist/
+frontend/build/
 
-# IDEs
+# IDE
 .vscode/
 .idea/
 *.swp
@@ -43,23 +42,14 @@ dist/
 *~
 .DS_Store
 
+# OS
+Thumbs.db
+
 # Logs
 *.log
 logs/
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Misc
+# Optional
 .cache
 .pytest_cache/
 .coverage
-htmlcov/
-
-# Google credentials (NEVER commit!)
-google-credentials.json
-service-account-key.json
-
-# Production
-frontend/build/
