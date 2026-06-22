@@ -37,24 +37,13 @@ if os.name == 'nt':  # Windows
 
 load_dotenv()
 
-# ============================================================================
-# CONFIGURATION & INITIALIZATION
-# ============================================================================
 
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 
-# WhatsApp Configuration (Optional - implement later)
-# WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN", "")
-# WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "")
-# MANAGER_PHONE = os.getenv("MANAGER_PHONE", "+1234567890")
 
-# Google Credentials
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "{}")
 
-# ============================================================================
-# DATABASE SETUP
-# ============================================================================
 
 @lru_cache(maxsize=1)
 def get_mongodb_client():
@@ -75,9 +64,6 @@ def get_db():
         return client['card_digitization']
     return None
 
-# ============================================================================
-# GOOGLE SHEETS API SETUP
-# ============================================================================
 
 def get_sheets_service():
     """Authenticate and return Google Sheets service"""
@@ -102,9 +88,6 @@ def get_sheets_service():
         print(f"✗ Google Sheets auth failed: {e}")
         return None
 
-# ============================================================================
-# MODELS
-# ============================================================================
 
 class ContactData(BaseModel):
     """Contact data structure extracted from visiting cards"""
@@ -135,9 +118,6 @@ class SessionState(BaseModel):
     conversation_history: list = Field(default_factory=list)
     step: Literal["awaiting_card", "processing_card", "card_processed", "awaiting_voice", "complete"] = "awaiting_card"
 
-# ============================================================================
-# FASTAPI APP SETUP
-# ============================================================================
 
 app = FastAPI(
     title="Card Digitization API",
@@ -145,7 +125,6 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -154,9 +133,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============================================================================
-# TOOL: EXTRACT CARD DATA (Google Cloud Vision API)
-# ============================================================================
 
 def extract_card_data(image_base64: str) -> ContactData:
     """
@@ -170,11 +146,9 @@ def extract_card_data(image_base64: str) -> ContactData:
     5. Return structured ContactData
     """
     try:
-        # Decode base64 image
         image_data = base64.b64decode(image_base64)
         image = Image.open(io.BytesIO(image_data))
         
-        # Extract text using Tesseract OCR
         full_text = pytesseract.image_to_string(image)
         
         if not full_text.strip():
@@ -182,7 +156,6 @@ def extract_card_data(image_base64: str) -> ContactData:
         
         print(f"Extracted text: {full_text[:100]}...")
         
-        # Parse extracted text into structured format
         extracted_data = parse_business_card_text(full_text)
         return ContactData(**extracted_data)
         
@@ -205,7 +178,6 @@ def parse_business_card_text(text: str) -> dict:
         "designation": None
     }
     
-    # Find email
     email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
     for line in lines:
         email_match = re.search(email_pattern, line)
@@ -213,7 +185,6 @@ def parse_business_card_text(text: str) -> dict:
             contact["email"] = email_match.group(0)
             break
     
-    # Find phone (longer sequences of numbers)
     phone_pattern = r'\b\d{7,}\b'
     for line in lines:
         phone_match = re.search(phone_pattern, line)
@@ -223,14 +194,12 @@ def parse_business_card_text(text: str) -> dict:
                 contact["phone"] = phone_num
                 break
     
-    # Find name (usually first meaningful line without special chars)
     for line in lines:
         if len(line) > 3 and '@' not in line and not re.search(r'\d{7,}', line):
             if 'UNIVERSITY' not in line.upper() and 'STUDENT' not in line.upper():
                 contact["name"] = line
                 break
     
-    # Find designation (line with STUDENT, MANAGER, etc.)
     for line in lines:
         if 'STUDENT' in line.upper():
             contact["designation"] = "STUDENT"
@@ -239,7 +208,6 @@ def parse_business_card_text(text: str) -> dict:
         elif 'CEO' in line.upper():
             contact["designation"] = "CEO"
     
-    # Find company (UNIVERSITY, company names)
     for line in lines:
         if 'UNIVERSITY' in line.upper() or 'COMPANY' in line.upper():
             contact["company"] = line.replace("UNIVERSITY", "").replace("COMPANY", "").strip()
@@ -248,9 +216,6 @@ def parse_business_card_text(text: str) -> dict:
     
     return contact
 
-# ============================================================================
-# TOOL: CHECK DUPLICATES IN GOOGLE SHEETS
-# ============================================================================
 
 def check_duplicate_in_sheets(contact: ContactData) -> dict:
     """
@@ -265,7 +230,6 @@ def check_duplicate_in_sheets(contact: ContactData) -> dict:
         if not service or not GOOGLE_SHEETS_ID:
             return {"exists": False, "row_index": None, "message": "Sheets service unavailable"}
         
-        # Read all rows from sheet
         result = service.spreadsheets().values().get(
             spreadsheetId=GOOGLE_SHEETS_ID,
             range="Sheet1!A:E"
@@ -273,7 +237,6 @@ def check_duplicate_in_sheets(contact: ContactData) -> dict:
         
         rows = result.get('values', [])
         
-        # Check for duplicate by email or phone
         for idx, row in enumerate(rows[1:], start=2):  # Skip header row
             if len(row) >= 2:
                 row_email = row[2] if len(row) > 2 else ""
@@ -292,9 +255,6 @@ def check_duplicate_in_sheets(contact: ContactData) -> dict:
         print(f"Duplicate check error: {e}")
         return {"exists": False, "row_index": None, "error": str(e)}
 
-# ============================================================================
-# TOOL: ADD TO GOOGLE SHEETS
-# ============================================================================
 
 def add_to_sheets(contact: ContactData) -> dict:
     """
@@ -307,7 +267,6 @@ def add_to_sheets(contact: ContactData) -> dict:
         if not service or not GOOGLE_SHEETS_ID:
             return {"success": False, "message": "Sheets service unavailable"}
         
-        # Prepare row data
         row = [
             contact.name,
             contact.phone or "",
@@ -316,7 +275,6 @@ def add_to_sheets(contact: ContactData) -> dict:
             contact.designation or ""
         ]
         
-        # Append to sheet
         body = {"values": [row]}
         result = service.spreadsheets().values().append(
             spreadsheetId=GOOGLE_SHEETS_ID,
@@ -333,9 +291,6 @@ def add_to_sheets(contact: ContactData) -> dict:
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# ============================================================================
-# TOOL: UPDATE GOOGLE SHEETS WITH VOICE NOTE
-# ============================================================================
 
 def update_sheets_with_voice(row_index: int, voice_url: str, transcript: str = "") -> dict:
     """
@@ -348,7 +303,6 @@ def update_sheets_with_voice(row_index: int, voice_url: str, transcript: str = "
         if not service or not GOOGLE_SHEETS_ID:
             return {"success": False, "message": "Sheets service unavailable"}
         
-        # Update voice column
         cell = f"Sheet1!F{row_index}"
         body = {"values": [[voice_url]]}
         
@@ -363,9 +317,6 @@ def update_sheets_with_voice(row_index: int, voice_url: str, transcript: str = "
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# ============================================================================
-# TOOL: SEND WHATSAPP NOTIFICATION (TODO - Implement Later)
-# ============================================================================
 
 async def send_whatsapp_notification(contact: ContactData) -> dict:
     """
@@ -386,26 +337,10 @@ async def send_whatsapp_notification(contact: ContactData) -> dict:
     For now: Function logs success but doesn't send
     """
     
-    # TODO: Implement WhatsApp API integration
-    # message_text = f"""
-    # 📇 New Contact Digitized!
-    # Name: {contact.name}
-    # Phone: {contact.phone or 'N/A'}
-    # Email: {contact.email or 'N/A'}
-    # Company: {contact.company or 'N/A'}
-    # """
-    # 
-    # # Call WhatsApp API
-    # # url = f"https://graph.instagram.com/v18.0/{WHATSAPP_PHONE_ID}/messages"
-    # # headers = {"Authorization": f"Bearer {WHATSAPP_API_TOKEN}", ...}
-    # # response = await client.post(url, json=payload, headers=headers)
     
     print(f"[LOG] WhatsApp notification would be sent for {contact.name}")
     return {"success": True, "message": "WhatsApp notification logged (not sent - feature pending)"}
 
-# ============================================================================
-# TOOL: PROCESS AUDIO
-# ============================================================================
 
 def process_audio(audio_base64: str) -> str:
     """
@@ -415,15 +350,10 @@ def process_audio(audio_base64: str) -> str:
     Future: Upload to cloud storage (GCS/S3) and return accessible URL
     """
     try:
-        # For now, return the base64 as a data URL
-        # In production, upload to Cloud Storage and get a proper URL
         return f"data:audio/wav;base64,{audio_base64[:50]}..."
     except Exception as e:
         raise ValueError(f"Audio processing failed: {str(e)}")
 
-# ============================================================================
-# SESSION MANAGEMENT
-# ============================================================================
 
 def get_or_create_session(session_id: str, user_id: str) -> SessionState:
     """Get existing session or create new one"""
@@ -451,9 +381,6 @@ def save_session(session: SessionState):
             upsert=True
         )
 
-# ============================================================================
-# MAIN ORCHESTRATION LOGIC (LangGraph-style Agent)
-# ============================================================================
 
 async def process_chat_message(chat_msg: ChatMessage) -> dict:
     """
@@ -471,7 +398,6 @@ async def process_chat_message(chat_msg: ChatMessage) -> dict:
     response_messages = []
     
     try:
-        # ===== STATE: AWAITING_CARD =====
         if session.step == "awaiting_card":
             if chat_msg.image_base64:
                 session.step = "processing_card"
@@ -480,7 +406,6 @@ async def process_chat_message(chat_msg: ChatMessage) -> dict:
                     "content": "📊 Extracting card details using Google Vision API..."
                 })
                 
-                # Extract contact data using Google Vision
                 contact = extract_card_data(chat_msg.image_base64)
                 session.current_contact = contact
                 
@@ -497,7 +422,6 @@ Checking for duplicates...""",
                     "contact": contact.model_dump()
                 })
                 
-                # Check for duplicates in Google Sheets
                 dup_check = check_duplicate_in_sheets(contact)
                 
                 if dup_check["exists"]:
@@ -507,7 +431,6 @@ Checking for duplicates...""",
                         "content": f"⚠️ {dup_check['message']}\n\nYou can still add a voice note to this existing contact."
                     })
                 else:
-                    # Add unique contact to Google Sheets
                     sheets_result = add_to_sheets(contact)
                     
                     if sheets_result["success"]:
@@ -516,7 +439,6 @@ Checking for duplicates...""",
                             "content": "✅ Contact added to Google Sheets!"
                         })
                         
-                        # TODO: Send WhatsApp notification when implemented
                         whatsapp_result = await send_whatsapp_notification(contact)
                         if whatsapp_result["success"]:
                             response_messages.append({
@@ -541,7 +463,6 @@ Checking for duplicates...""",
                     "content": "Please upload an image of the visiting card to get started."
                 })
         
-        # ===== STATE: AWAITING_VOICE =====
         elif session.step == "awaiting_voice":
             if chat_msg.audio_base64:
                 session.step = "complete"
@@ -550,12 +471,9 @@ Checking for duplicates...""",
                     "content": "🎙️ Processing voice note..."
                 })
                 
-                # Process audio
                 voice_url = process_audio(chat_msg.audio_base64)
                 session.current_contact.voice_note_url = voice_url
                 
-                # Update contact in sheets with voice URL
-                # TODO: Find the actual row index and update it
                 response_messages.append({
                     "type": "success",
                     "content": "✅ Voice note recorded and linked to contact!"
@@ -566,7 +484,6 @@ Checking for duplicates...""",
                     "content": "📸 Ready for another card? Upload a new visiting card image to continue."
                 })
                 
-                # Reset for next card
                 session.step = "awaiting_card"
                 session.current_contact = None
             else:
@@ -575,14 +492,12 @@ Checking for duplicates...""",
                     "content": "Ready to record. Upload an audio file or type 'skip' to continue."
                 })
         
-        # ===== DEFAULT =====
         else:
             response_messages.append({
                 "type": "prompt",
                 "content": "Please upload a visiting card image to begin."
             })
         
-        # Save session state to MongoDB
         save_session(session)
         
         return {
@@ -606,18 +521,15 @@ Checking for duplicates...""",
             "error": str(e)
         }
 
-# ============================================================================
-# API ENDPOINTS
-# ============================================================================
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint - verify all services"""
+    db = get_db()
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "services": {
-            "mongodb": "connected" if get_db() else "disconnected",
+            "mongodb": "connected" if db is not None else "disconnected",
             "google_sheets": "configured" if get_sheets_service() else "not_configured",
             "google_vision": "configured" if GOOGLE_CREDENTIALS_JSON != '{}' else "not_configured",
             "python_version": "3.13.14"
@@ -651,9 +563,6 @@ async def list_contacts(user_id: str, skip: int = 0, limit: int = 50):
         "contacts": contacts
     }
 
-# ============================================================================
-# STARTUP & SHUTDOWN
-# ============================================================================
 
 @app.on_event("startup")
 async def startup_event():
@@ -662,7 +571,6 @@ async def startup_event():
     print("🚀 Card Digitization API v2.0 Starting...")
     print("="*60)
     
-    # Check MongoDB
     db = get_db()
     mongo_status = "Connected" if db is not None else "Failed to connect"
     print(f"📊 Google Sheets ID: {GOOGLE_SHEETS_ID[:20]}..." if GOOGLE_SHEETS_ID else "⚠️ No Sheets ID")
@@ -676,9 +584,7 @@ async def shutdown_event():
     """Shutdown event"""
     print("\n🛑 Shutting down API...\n")
     
-async def shutdown_event():
-    """Shutdown event"""
-    print("\n🛑 Shutting down API...\n")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
