@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: cardvision-ai-backend
+    env: python
+    region: virginia
+    plan: free
+    pythonVersion: 3.13
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 8000
+    aptPackages:
+      - tesseract-ocr
